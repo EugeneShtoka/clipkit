@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 )
 
 // mxctlConfig holds options received via --config flag.
@@ -92,18 +93,25 @@ func run(r io.Reader, w io.Writer, opts []Option, cfg *mxctlConfig) error {
 	bw := bufio.NewWriter(w)
 	defer bw.Flush()
 
+	var lines []string
 	for scanner.Scan() {
 		out, err := Parse(scanner.Text(), opts...)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "clipkit: %v\n", err)
 			os.Exit(1)
 		}
-		fmt.Fprintln(bw, out)
+		lines = append(lines, out)
 	}
 	if err := scanner.Err(); err != nil {
 		fmt.Fprintf(os.Stderr, "clipkit: read error: %v\n", err)
 		os.Exit(1)
 	}
+
+	for len(lines) > 0 && strings.TrimSpace(lines[len(lines)-1]) == "" {
+		lines = lines[:len(lines)-1]
+	}
+
+	fmt.Fprint(bw, strings.Join(lines, "\n"))
 	return nil
 }
 
