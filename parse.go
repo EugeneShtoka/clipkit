@@ -143,14 +143,16 @@ func Parse(s string, opts ...Option) (string, error) {
 
 	if cfg.extractCode {
 		withoutURLs := urlRe.ReplaceAllString(s, "")
-		var matches []string
+		seen := map[string]struct{}{}
 		for _, m := range codeRe.FindAllString(withoutURLs, -1) {
 			if containsDigit(m) {
-				matches = append(matches, m)
+				seen[m] = struct{}{}
 			}
 		}
-		if len(matches) == 1 {
-			return matches[0], nil
+		if len(seen) == 1 {
+			for m := range seen {
+				return m, nil
+			}
 		}
 		return "", nil
 	}

@@ -170,6 +170,8 @@ func TestExtractCodeUniqueness(t *testing.T) {
 		want string
 	}{
 		// pure-digit uniqueness
+		{"same code twice → extract", "802549 your code is 802549", "802549"},
+		{"same code twice in different forms → extract", "Code: 123456 #123456", "123456"},
 		{"two 6-digit codes → nothing", "codes: 111111 and 222222", ""},
 		{"two 5-digit codes → nothing", "12345 and 67890", ""},
 		{"one 5-digit + one 6-digit → nothing", "12345 and 123456", ""},
