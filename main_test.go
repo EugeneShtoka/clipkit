@@ -10,16 +10,16 @@ import (
 func runWith(t *testing.T, input string, opts ...Option) string {
 	t.Helper()
 	var out strings.Builder
-	if err := run(strings.NewReader(input), &out, opts, nil); err != nil {
+	if err := run(strings.NewReader(input), &out, opts, "", false); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	return strings.TrimRight(out.String(), "\n")
 }
 
-func runPipe(t *testing.T, inputJSON string, cfg mxctlConfig) (string, error) {
+func runJSON(t *testing.T, inputJSON, field string, extraction bool, opts ...Option) (string, error) {
 	t.Helper()
 	var out strings.Builder
-	err := run(strings.NewReader(inputJSON), &out, nil, &cfg)
+	err := run(strings.NewReader(inputJSON), &out, opts, field, extraction)
 	return strings.TrimRight(out.String(), "\n"), err
 }
 
@@ -47,10 +47,10 @@ func TestRunPlainMultiLine(t *testing.T) {
 	}
 }
 
-// ---- pipe mode -------------------------------------------------------------
+// ---- JSON mode -------------------------------------------------------------
 
-func TestRunPipeModePassthrough(t *testing.T) {
-	got, err := runPipe(t, `{"body":"  hello world  "}`, mxctlConfig{})
+func TestRunJSONPassthrough(t *testing.T) {
+	got, err := runJSON(t, `{"body":"  hello world  "}`, "body", false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -63,51 +63,38 @@ func TestRunPipeModePassthrough(t *testing.T) {
 	}
 }
 
-func TestRunPipeModeExtractCode(t *testing.T) {
-	got, err := runPipe(t, `{"body":"Your OTP is 482910"}`, mxctlConfig{ExtractCode: true})
+func TestRunJSONExtractCode(t *testing.T) {
+	got, err := runJSON(t, `{"body":"Your OTP is 482910"}`, "body", true, WithExtractCode())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	var obj map[string]string
-	if e := json.Unmarshal([]byte(got), &obj); e != nil {
-		t.Fatalf("output is not valid JSON: %v", e)
-	}
-	if obj["body"] != "482910" {
-		t.Errorf("body = %q, want %q", obj["body"], "482910")
+	if got != "482910" {
+		t.Errorf("got %q, want %q", got, "482910")
 	}
 }
 
-func TestRunPipeModeNoMatchReturnsErrNoMatch(t *testing.T) {
-	_, err := runPipe(t, `{"body":"no code here"}`, mxctlConfig{ExtractCode: true})
+func TestRunJSONNoMatchReturnsErrNoMatch(t *testing.T) {
+	_, err := runJSON(t, `{"body":"no code here"}`, "body", true, WithExtractCode())
 	if !errors.Is(err, errNoMatch) {
 		t.Errorf("expected errNoMatch, got %v", err)
 	}
 }
 
-func TestRunPipeModePreservesFields(t *testing.T) {
+func TestRunJSONExtractCodePlainOutput(t *testing.T) {
+	// extraction with --json outputs just the value, not a JSON envelope
 	input := `{"body":"OTP: 111222","sender":"@alice:example.com","room_name":"Work"}`
-	got, err := runPipe(t, input, mxctlConfig{ExtractCode: true})
+	got, err := runJSON(t, input, "body", true, WithExtractCode())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	var obj map[string]string
-	if e := json.Unmarshal([]byte(got), &obj); e != nil {
-		t.Fatalf("output is not valid JSON: %v", e)
-	}
-	if obj["body"] != "111222" {
-		t.Errorf("body = %q, want %q", obj["body"], "111222")
-	}
-	if obj["sender"] != "@alice:example.com" {
-		t.Errorf("sender = %q, want preserved", obj["sender"])
-	}
-	if obj["room_name"] != "Work" {
-		t.Errorf("room_name = %q, want preserved", obj["room_name"])
+	if got != "111222" {
+		t.Errorf("got %q, want %q", got, "111222")
 	}
 }
 
-func TestRunPipeModePreservesCustomFields(t *testing.T) {
+func TestRunJSONPreservesCustomFields(t *testing.T) {
 	input := `{"body":"hello","urgency":"critical","custom_flag":true}`
-	got, err := runPipe(t, input, mxctlConfig{Collapse: true})
+	got, err := runJSON(t, input, "body", false, WithCollapseSpaces())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -123,29 +110,25 @@ func TestRunPipeModePreservesCustomFields(t *testing.T) {
 	}
 }
 
-func TestRunPipeModeExtractURL(t *testing.T) {
-	got, err := runPipe(t, `{"body":"check https://example.com now"}`, mxctlConfig{ExtractURL: true})
+func TestRunJSONExtractURL(t *testing.T) {
+	got, err := runJSON(t, `{"body":"check https://example.com now"}`, "body", true, WithExtractURL())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	var obj map[string]string
-	if e := json.Unmarshal([]byte(got), &obj); e != nil {
-		t.Fatalf("output is not valid JSON: %v", e)
-	}
-	if obj["body"] != "https://example.com" {
-		t.Errorf("body = %q, want %q", obj["body"], "https://example.com")
+	if got != "https://example.com" {
+		t.Errorf("got %q, want %q", got, "https://example.com")
 	}
 }
 
-func TestRunPipeModeNoURLReturnsErrNoMatch(t *testing.T) {
-	_, err := runPipe(t, `{"body":"no url here"}`, mxctlConfig{ExtractURL: true})
+func TestRunJSONNoURLReturnsErrNoMatch(t *testing.T) {
+	_, err := runJSON(t, `{"body":"no url here"}`, "body", true, WithExtractURL())
 	if !errors.Is(err, errNoMatch) {
 		t.Errorf("expected errNoMatch, got %v", err)
 	}
 }
 
-func TestRunPipeModeCollapse(t *testing.T) {
-	got, err := runPipe(t, `{"body":"  foo   bar  "}`, mxctlConfig{Collapse: true})
+func TestRunJSONCollapse(t *testing.T) {
+	got, err := runJSON(t, `{"body":"  foo   bar  "}`, "body", false, WithCollapseSpaces())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -156,8 +139,8 @@ func TestRunPipeModeCollapse(t *testing.T) {
 	}
 }
 
-func TestRunPipeModeMaxLen(t *testing.T) {
-	got, err := runPipe(t, `{"body":"hello world"}`, mxctlConfig{MaxLen: 5})
+func TestRunJSONMaxLen(t *testing.T) {
+	got, err := runJSON(t, `{"body":"hello world"}`, "body", false, WithMaxLen(5))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -168,12 +151,28 @@ func TestRunPipeModeMaxLen(t *testing.T) {
 	}
 }
 
-func TestRunPipeModeEmptyBodyNoMatchOnExtract(t *testing.T) {
-	_, err := runPipe(t, `{"sender":"@alice:example.com"}`, mxctlConfig{ExtractCode: true})
+func TestRunJSONEmptyFieldNoMatchOnExtract(t *testing.T) {
+	_, err := runJSON(t, `{"sender":"@alice:example.com"}`, "body", true, WithExtractCode())
 	if !errors.Is(err, errNoMatch) {
-		t.Errorf("expected errNoMatch for missing body, got %v", err)
+		t.Errorf("expected errNoMatch for missing field, got %v", err)
+	}
+}
+
+func TestRunJSONCustomField(t *testing.T) {
+	got, err := runJSON(t, `{"title":"  hello   world  ","other":"keep"}`, "title", false, WithCollapseSpaces())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	var obj map[string]string
+	if e := json.Unmarshal([]byte(got), &obj); e != nil {
+		t.Fatalf("output is not valid JSON: %v", e)
+	}
+	if obj["title"] != "hello world" {
+		t.Errorf("title = %q, want %q", obj["title"], "hello world")
+	}
+	if obj["other"] != "keep" {
+		t.Errorf("other = %q, want preserved", obj["other"])
 	}
 }
 
 // ---- flag validation -------------------------------------------------------
-
